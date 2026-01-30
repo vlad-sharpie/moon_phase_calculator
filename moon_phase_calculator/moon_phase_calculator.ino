@@ -21,25 +21,33 @@
 */
 
 #include "moon_images.h"
-#include <U8g2lib.h>
+// #include <U8g2lib.h>
+#include <GxEPD2_BW.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+// #include <WiFi.h>
+// #include "time.h"
+
 
 // I2C Pin definition
-#define CLOCK_PIN 15
-#define DATA_PIN  4
-#define RESET_PIN 16
+// #define CLOCK_PIN 15
+// #define DATA_PIN  4
+// #define RESET_PIN 16
 
 
 // u8g2 contructor
-U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, CLOCK_PIN, DATA_PIN, RESET_PIN);
+//U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, CLOCK_PIN, DATA_PIN, RESET_PIN);
+
+GxEPD2_BW<GxEPD2_420_GDEY042T81, GxEPD2_420_GDEY042T81::HEIGHT> display(GxEPD2_420_GDEY042T81(/*CS=5*/ 5, /*DC=*/ 4, /*RES=*/ 2, /*BUSY=*/ 15)); // 400x300, SSD1683
+
 
 
 //--------------------------------------------------------------------------------------------
 //                                 INPUTS
 //--------------------------------------------------------------------------------------------
 int timeZone = 2;
-int day = 17;
-int month = 8;
-int year = 2021;
+int day = 6;
+int month = 1;
+int year = 2026;
 int moonNum = -1;
 char* moonPhaseStr;
 
@@ -59,39 +67,99 @@ const unsigned char* moonPhaseImages[29] = {moon1_bmp, moon2_bmp, moon3_bmp, moo
 //--------------------------------------------------------------------------------------------
 void setup() 
 {
-    u8g2.begin();
-    Serial.begin(9600);
+    // u8g2.begin();
+    Serial.begin(115200);
+    display.init(115200, true, 50, false);
+    display.setRotation(1);
+    Serial.print("Expected bytes for 240x240: ");
+    Serial.println(240 * 240 / 8);  // Should be 7200
+    Serial.print("Array size: ");
+    Serial.println(sizeof(moon17_bmp));
 }
 
 
 //--------------------------------------------------------------------------------------------
 //                                 VOID LOOP
 //--------------------------------------------------------------------------------------------
-void loop() 
-{
-    // Calculate the moon number
-    moonNum = moonPhases(year, month, day);
+// void loop() 
+// {
+//     // Calculate the moon number
+//     moonNum = moonPhases(year, month, day);
     
    
-    u8g2.firstPage();
-    do 
-    {
-      // Set the font for the moon phase text
-      u8g2.setFont(u8g2_font_5x7_tr); //u8g2_font_ncenB14_tr, u8g2_font_5x7_tr, u8g2_font_4x6_tf
+//     u8g2.firstPage();
+//     do 
+//     {
+//       // Set the font for the moon phase text
+//       u8g2.setFont(u8g2_font_5x7_tr); //u8g2_font_ncenB14_tr, u8g2_font_5x7_tr, u8g2_font_4x6_tf
       
-      // Draw the moon phase image
-      u8g2.drawXBMP(34, 0, moon_width, moon_height, moonPhaseImages[moonNum]);
+//       // Draw the moon phase image
+//       u8g2.drawXBMP(34, 0, moon_width, moon_height, moonPhaseImages[moonNum]);
   
-      // Write the moon phase text
-      u8g2.drawStr(25,64,"Moon day is : ");
-      u8g2.setCursor(100, 64);
-      u8g2.print(moonNum);
+//       // Write the moon phase text
+//       u8g2.drawStr(25,64,"Moon day is : ");
+//       u8g2.setCursor(100, 64);
+//       u8g2.print(moonNum);
   
-    } while (u8g2.nextPage());
+//     } while (u8g2.nextPage());
   
-    delay(500);
+//     delay(500);
 
+// }
+
+void loop() {
+    moonNum = moonPhases(year, month, day);
+    
+    display.fillScreen(GxEPD_BLACK);
+    
+    // Draw moon image (your working XBM version)
+    drawMoonScaledXBM(50, 100, moonPhaseImages[moonNum], 60, 60, 4, GxEPD_WHITE);
+    
+    // Get moon phase text
+    char moonText[64];
+    getMoonPhaseText(moonNum, moonText);
+    
+    // Display the text
+    display.setTextColor(GxEPD_WHITE);
+    display.setFont(&FreeMonoBold9pt7b);
+    display.setCursor(25, 64);
+    display.print(moonText);
+    
+    display.display(false);
+    delay(3600000UL);
 }
+
+
+
+// Use your WORKING 60x60 image data
+// This function scales it 4x to display at 240x240
+
+void drawMoonScaledXBM(int16_t x, int16_t y, const uint8_t *bitmap, 
+                       int16_t srcW, int16_t srcH, int16_t scale, uint16_t color) {
+    
+    int16_t bytesPerRow = (srcW + 7) / 8;
+    
+    for (int16_t srcRow = 0; srcRow < srcH; srcRow++) {
+        for (int16_t srcCol = 0; srcCol < srcW; srcCol++) {
+            
+            uint16_t byteIdx = srcRow * bytesPerRow + (srcCol >> 3);
+            uint8_t bitIdx = srcCol & 7;  // LSB first for XBM
+            
+            uint8_t byte = pgm_read_byte(&bitmap[byteIdx]);
+            
+            if (byte & (1 << bitIdx)) {
+                for (int16_t dy = 0; dy < scale; dy++) {
+                    for (int16_t dx = 0; dx < scale; dx++) {
+                        display.drawPixel(x + srcCol * scale + dx, 
+                                         y + srcRow * scale + dy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 
 
 //----------------------------------------------------------------------------------------
@@ -196,55 +264,34 @@ double julianDat(int year, int month, int day)
 
 
 
-//----------------------------------------------------------------------------------------
-//                            GET THE MOONPHASE TEXT
-//----------------------------------------------------------------------------------------    
-char* moonPhaseText(int moonNum)
- { 
-    char outputStr[50];
+void getMoonPhaseText(int moonNum, char* outputStr) {
+    const char* moonPhase;
     
-    char moonPhase[50] = " new Moon";
-    char tempStr[50] = " new Moon";
-
-   
-    if ((moonNum > 03) && (moonNum < 11)) sprintf(moonPhase,"%s", " First Quarter");  //moonPhase = " First Quarter";
-    if ((moonNum > 10) && (moonNum < 18)) sprintf(moonPhase,"%s", " Full Moon");      //moonPhase = " Full Moon";
-    if ((moonNum > 17) && (moonNum < 25)) sprintf(moonPhase,"%s", " Last Quarter");   //moonPhase = " Last Quarter";
-
-    if ((moonNum == 01) || (moonNum == 8) || (moonNum == 15) || (moonNum == 22))  
-    {
-      sprintf(outputStr,"1 day past %s", moonPhase);
+    // Determine the base phase
+    if (moonNum <= 3 || moonNum >= 25) {
+        moonPhase = "New Moon";
+    } else if (moonNum >= 4 && moonNum <= 10) {
+        moonPhase = "First Quarter";
+    } else if (moonNum >= 11 && moonNum <= 17) {
+        moonPhase = "Full Moon";
+    } else {
+        moonPhase = "Last Quarter";
     }
     
-    if ((moonNum == 02) || (moonNum == 9) || (moonNum == 16) || (moonNum == 23))
-    {
-      sprintf(outputStr,"2 days past %s", moonPhase);
-    }
+    // Calculate days relative to phase
+    int daysFromPhase = moonNum % 7;
     
-    if ((moonNum == 03) || (moonNum == 10) || (moonNum == 17) || (moonNum == 24)) 
-    {
-      sprintf(outputStr,"3 days past %s", moonPhase);
+    if (daysFromPhase == 0) {
+        sprintf(outputStr, "%s", moonPhase);
+    } else if (daysFromPhase <= 3) {
+        sprintf(outputStr, "%d day%s past %s", daysFromPhase, 
+                daysFromPhase == 1 ? "" : "s", moonPhase);
+    } else {
+        int daysBefore = 7 - daysFromPhase;
+        sprintf(outputStr, "%d day%s before %s", daysBefore,
+                daysBefore == 1 ? "" : "s", moonPhase);
     }
-   
-    if ((moonNum == 04) || (moonNum == 11) || (moonNum == 18) || (moonNum == 25))
-    {
-      sprintf(outputStr,"3 days before %s", moonPhase);
-    }
-    
-    if ((moonNum == 05) || (moonNum == 12) || (moonNum == 19) || (moonNum == 26))
-    {
-      sprintf(outputStr,"2 days before %s", moonPhase);
-    }
-    
-    if ((moonNum == 06) || (moonNum == 13) || (moonNum == 20) || (moonNum == 27)) 
-    {
-      sprintf(outputStr,"1 day before %s", moonPhase);
-    }
-    
-   
-    return outputStr;
-
- }
+}
 
 
 
